@@ -14,3 +14,6 @@
   - [ ] numbers
   - [ ] operators
   - [ ] `is`
+- [ ] better answers
+  - [ ] multiple results
+  - [ ] formatting (`X = hello, Y = world`-type stuff)
