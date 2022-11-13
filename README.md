@@ -4,10 +4,13 @@
 
 ## Todo
 
-- [ ] numbers
+- [x] backtracking (maybe)
 - [ ] rules
 - [ ] builtins
   - [ ] conjunction
   - [ ] list
   - [ ] cut
-  - [ ] is/arithmetic
+- [ ] math
+  - [ ] numbers
+  - [ ] operators
+  - [ ] `is`

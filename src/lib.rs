@@ -82,10 +82,10 @@ pub enum Term {
 }
 
 impl Term {
-    fn atom_from_str(s: &str) -> Self {
+    pub fn atom_from_str(s: &str) -> Self {
         Self::Atom(Atom::from_str(s).unwrap())
     }
-    fn variable_from_str<Generator: Rng, N: AsRef<str>>(name: N, rng: &mut Generator) -> Self {
+    pub fn variable_from_str<Generator: Rng, N: AsRef<str>>(name: N, rng: &mut Generator) -> Self {
         Self::Variable(Variable::new_named(name, rng))
     }
 }
@@ -148,7 +148,7 @@ impl Functor {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Database {
     facts: Vec<Functor>,
 }
@@ -177,38 +177,39 @@ impl Database {
         }
         db
     }
-    pub fn satisfy<'a>(&mut self, goal: &'a mut Functor) -> Option<&'a Functor> {
-        if let Some(mut matched) = self.next_match(&goal) {
-            self.unify(&mut matched, goal)
-        } else {
-            println!("{:?} doesn't match", goal);
-            println!("db: {:?}", self);
-            None
-        }
-    }
-    fn next_match(&self, goal: &Functor) -> Option<Functor> {
-        for f in self.facts.iter() {
-            if f == goal && f.is_not_yet_matched() {
-                return Some(f.clone());
+    pub fn satisfy<'a>(&mut self, goal: Functor) -> Option<Functor> {
+        let mut db = self.clone();
+        let g = goal.clone();
+        let mut matches = db.facts.iter_mut();
+        while let Some(mut matched) = matches.next() {
+            if matched == &g {
+                let g = goal.clone();
+                let unified = self.unify(&mut matched, g);
+                println!("unified {:?}", unified);
+                if unified.is_some() {
+                    return unified;
+                }
             }
         }
-        return None;
+        None
     }
-    fn unify<'a>(&self, fst: &mut Functor, snd: &'a mut Functor) -> Option<&'a Functor> {
+    fn unify(&self, fst: &mut Functor, mut snd: Functor) -> Option<Functor> {
         use std::borrow::BorrowMut;
         for (fst_term, snd_term) in fst.args.iter_mut().zip(snd.args.iter_mut()) {
+            println!("fst_term {:?}", fst_term);
+            println!("snd_term {:?}", snd_term);
             match (fst_term, snd_term) {
                 (Term::Atom(fst_atom), Term::Atom(snd_atom)) if fst_atom == snd_atom => continue,
-                (Term::Atom(_), Term::Atom(_)) => break,
+                (Term::Atom(_), Term::Atom(_)) => return None,
                 (Term::Atom(fst_atom), Term::Variable(v)) if v.resolves_to(fst_atom) => continue,
-                (Term::Atom(_), Term::Variable(v)) if v.is_bound() => break,
+                (Term::Atom(_), Term::Variable(v)) if v.is_bound() => return None,
                 (Term::Atom(a), Term::Variable(v)) => v.bind(VariableBinding::Atom(a.clone())),
-                (Term::Atom(_), Term::Functor(_)) => break,
+                (Term::Atom(_), Term::Functor(_)) => return None,
                 (Term::Variable(v), Term::Atom(snd_atom)) if !v.is_bound() => {
                     v.bind(VariableBinding::Atom(snd_atom.clone()))
                 }
                 (Term::Variable(v), Term::Atom(snd_atom)) if v.resolves_to(snd_atom) => continue,
-                (Term::Variable(_), Term::Atom(_)) => break,
+                (Term::Variable(_), Term::Atom(_)) => return None,
                 (Term::Variable(fst_v), Term::Variable(snd_v)) => {
                     match (fst_v.resolve(), snd_v.resolve()) {
                         (None, None) => {
@@ -217,17 +218,17 @@ impl Database {
                         }
                         (Some(Atom(a)), None) => snd_v.bind(VariableBinding::Atom(Atom(a))),
                         (None, Some(Atom(a))) => fst_v.bind(VariableBinding::Atom(Atom(a))),
-                        (Some(Atom(_)), Some(Atom(_))) => break,
+                        (Some(Atom(_)), Some(Atom(_))) => return None,
                     }
                 }
-                (Term::Variable(_), Term::Functor(_)) => break,
-                (Term::Functor(_), Term::Atom(_)) => break,
-                (Term::Functor(_), Term::Variable(_)) => break,
+                (Term::Variable(_), Term::Functor(_)) => return None,
+                (Term::Functor(_), Term::Atom(_)) => return None,
+                (Term::Functor(_), Term::Variable(_)) => return None,
                 (Term::Functor(fst_f), Term::Functor(snd_f)) => {
-                    if self.unify(fst_f.borrow_mut(), snd_f.borrow_mut()).is_some() {
+                    if self.unify(fst_f.borrow_mut(), *snd_f.clone()).is_some() {
                         continue;
                     } else {
-                        break;
+                        return None;
                     }
                 }
             };
@@ -247,11 +248,11 @@ mod tests {
             Atom(String::from("cool")),
             vec![Term::atom_from_str("rust")],
         )]);
-        let mut goal = Functor::new_fact(
+        let goal = Functor::new_fact(
             Atom(String::from("cool")),
             vec![Term::variable_from_str("X", &mut gen)],
         );
-        let answer = db.satisfy(&mut goal).expect("answer");
+        let answer = db.satisfy(goal).expect("answer");
         if let Some(Term::Variable(v)) = answer.args.get(0) {
             assert_eq!(
                 v.resolve().expect("satisfy_unary v resolved"),
@@ -273,14 +274,14 @@ mod tests {
             vec![Term::atom_from_str("popeye"), Term::atom_from_str("treats")],
         );
         let mut db = Database::from_rules(vec![r1, r2]);
-        let mut goal = Functor::new_fact(
+        let goal = Functor::new_fact(
             Atom::from_str("likes").unwrap(),
             vec![
                 Term::variable_from_str("X", &mut gen),
                 Term::atom_from_str("chocolate"),
             ],
         );
-        let answer = db.satisfy(&mut goal).expect("answer");
+        let answer = db.satisfy(goal).expect("answer");
         if let Some(Term::Variable(v)) = answer.args.get(0) {
             assert_eq!(
                 v.resolve().expect("satisfy_two v resolved"),
@@ -288,6 +289,90 @@ mod tests {
             )
         } else {
             panic!("satisfy_two variable unbound")
+        }
+    }
+    #[test]
+    fn satisfy_backtrack() {
+        let mut gen = thread_rng();
+        let r1 = Functor::new_fact(
+            Atom::from_str("likes").unwrap(),
+            vec![Term::atom_from_str("sam"), Term::atom_from_str("chocolate")],
+        );
+        let r2 = Functor::new_fact(
+            Atom::from_str("likes").unwrap(),
+            vec![Term::atom_from_str("popeye"), Term::atom_from_str("treats")],
+        );
+        let mut db = Database::from_rules(vec![r1, r2]);
+        let goal = Functor::new_fact(
+            Atom::from_str("likes").unwrap(),
+            vec![
+                Term::variable_from_str("X", &mut gen),
+                Term::atom_from_str("treats"),
+            ],
+        );
+        let answer = db.satisfy(goal).expect("answer");
+        if let Some(Term::Variable(v)) = answer.args.get(0) {
+            assert_eq!(
+                v.resolve().expect("satisfy_backtrack v resolved"),
+                Atom::from_str("popeye").unwrap()
+            )
+        } else {
+            panic!("satisfy_backtrack variable unbound")
+        }
+    }
+    #[test]
+    fn satisfy_fail() {
+        let mut gen = thread_rng();
+        let r1 = Functor::new_fact(
+            Atom::from_str("likes").unwrap(),
+            vec![Term::atom_from_str("sam"), Term::atom_from_str("chocolate")],
+        );
+        let r2 = Functor::new_fact(
+            Atom::from_str("likes").unwrap(),
+            vec![Term::atom_from_str("popeye"), Term::atom_from_str("treats")],
+        );
+        let mut db = Database::from_rules(vec![r1, r2]);
+        let goal = Functor::new_fact(
+            Atom::from_str("likes").unwrap(),
+            vec![
+                Term::variable_from_str("X", &mut gen),
+                Term::atom_from_str("oranges"),
+            ],
+        );
+        assert!(db.satisfy(goal).is_none())
+    }
+    #[test]
+    fn satisfy_structure() {
+        let mut gen = thread_rng();
+        let r1 = Functor::new_fact(
+            Atom::from_str("person").unwrap(),
+            vec![
+                Term::atom_from_str("sam"),
+                Term::Functor(Box::new(Functor::new_fact(
+                    Atom::from_str("name").unwrap(),
+                    vec![Term::atom_from_str("sam")],
+                ))),
+            ],
+        );
+        let mut db = Database::from_rules(vec![r1]);
+        let goal = Functor::new_fact(
+            Atom::from_str("person").unwrap(),
+            vec![
+                Term::variable_from_str("X", &mut gen),
+                Term::Functor(Box::new(Functor::new_fact(
+                    Atom::from_str("name").unwrap(),
+                    vec![Term::atom_from_str("sam")],
+                ))),
+            ],
+        );
+        let answer = db.satisfy(goal).expect("satisfy_structure answer");
+        if let Some(Term::Variable(v)) = answer.args.get(0) {
+            assert_eq!(
+                v.resolve().expect("satisfy_structure v resolved"),
+                Atom::from_str("sam").unwrap()
+            )
+        } else {
+            panic!("satisfy_structure variable unbound")
         }
     }
 }
